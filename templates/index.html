@@ -1,9 +1,9 @@
 <!doctype html>
-<html lang="it">
+<html lang="en">
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>Cerca commento</title>
+  <title>Comment Finder</title>
   <style>
     :root {
       --bg: #f6f6f4; --card: #ffffff; --text: #1d1d1b; --muted: #6b6b66;
@@ -51,64 +51,155 @@
     .comment p { margin: 8px 0; white-space: pre-wrap; word-wrap: break-word; }
     .comment a { color: var(--accent); }
     .hidden-badge { color: var(--no); font-weight: 600; }
+    .status.wait { background: var(--card); color: var(--muted); border: 1px solid var(--border); font-weight: 400; }
+    .post-card h2 { font-size: 1rem; margin: 0 0 2px; }
+    .post-card h2 a { color: var(--text); text-decoration: none; }
+    .post-card h2 a:hover { text-decoration: underline; }
+    .caption {
+      margin: 12px 0 0; white-space: pre-wrap; word-wrap: break-word;
+      max-height: 12em; overflow: auto;
+    }
+    .caption.empty { color: var(--muted); font-style: italic; }
+    .section-label {
+      font-size: .75rem; font-weight: 600; text-transform: uppercase;
+      letter-spacing: .05em; color: var(--muted); margin: 0 0 8px;
+    }
+    [hidden] { display: none !important; }
   </style>
 </head>
 <body>
 <main>
-  <h1>Cerca commento</h1>
-  <p class="sub">Verifica se un account ha commentato un post Instagram.</p>
+  <h1>Comment Finder</h1>
+  <p class="sub">Check whether an account has commented on an Instagram post.</p>
 
-  <form class="card" method="post" id="search-form">
-    <label for="post">Link del post</label>
-    <input type="text" id="post" name="post" placeholder="https://www.instagram.com/p/..." value="{{ form.post }}" required>
+  <form class="card" id="search-form">
+    <label for="post">Post link</label>
+    <input type="text" id="post" name="post" placeholder="https://www.instagram.com/p/..." required>
 
-    <label for="target">Account da cercare</label>
-    <input type="text" id="target" name="target" placeholder="nome_utente" value="{{ form.target }}" required>
+    <label for="target">Account to look for</label>
+    <input type="text" id="target" name="target" placeholder="username" required>
 
     <div class="checks">
-      <label><input type="checkbox" name="replies" {% if form.replies %}checked{% endif %}> Includi le risposte</label>
-      <label><input type="checkbox" name="all" {% if form.all %}checked{% endif %}> Trova tutti i commenti dell'account</label>
+      <label><input type="checkbox" id="replies" checked> Include replies</label>
+      <label><input type="checkbox" id="all"> Find all of the account's comments</label>
     </div>
 
-    <button type="submit" id="submit">Cerca</button>
+    <button type="submit" id="submit">Search</button>
   </form>
 
-  {% if error %}
-    <div class="status err">{{ error }}</div>
-  {% endif %}
+  <div id="error" class="status err" hidden></div>
 
-  {% if result %}
-    {% if result.matches %}
-      <div class="status ok">
-        Trovat{{ 'o' if result.matches|length == 1 else 'i' }} {{ result.matches|length }}
-        comment{{ 'o' if result.matches|length == 1 else 'i' }} di @{{ result.target }}
-      </div>
-    {% else %}
-      <div class="status no">Nessun commento di @{{ result.target }}</div>
-    {% endif %}
-    <p class="meta">
-      Post di @{{ result.post_owner }} · {{ result.declared_comments }} commenti dichiarati ·
-      {{ result.scanned }} analizzati
-    </p>
+  <section id="post-section" hidden>
+    <p class="section-label">Post being searched</p>
+    <div class="card post-card">
+      <h2><a id="post-link" target="_blank" rel="noopener"></a></h2>
+      <div class="meta" id="post-meta"></div>
+      <p class="caption" id="post-caption"></p>
+    </div>
+  </section>
 
-    {% for m in result.matches %}
-      <div class="card comment">
-        <div class="meta">
-          {% if m.reply_to %}Risposta a @{{ m.reply_to }}{% else %}Commento{% endif %}
-          · {{ m.date }} · {{ m.likes }} like
-          {% if m.hidden %}· <span class="hidden-badge">nascosto da Instagram</span>{% endif %}
-        </div>
-        <p>{{ m.text }}</p>
-        <a href="{{ m.url }}" target="_blank" rel="noopener">Apri su Instagram</a>
-      </div>
-    {% endfor %}
-  {% endif %}
+  <div id="waiting" class="status wait" hidden>Searching comments… (this may take a few minutes)</div>
+
+  <section id="result-section" hidden>
+    <div id="result-status" class="status"></div>
+    <p class="meta" id="result-meta"></p>
+    <div id="matches"></div>
+  </section>
 </main>
 <script>
-  document.getElementById("search-form").addEventListener("submit", function () {
-    var btn = document.getElementById("submit");
-    btn.disabled = true;
-    btn.textContent = "Ricerca in corso… (può richiedere qualche minuto)";
+  var $ = function (id) { return document.getElementById(id); };
+  var plural = function (n, word) { return n + " " + word + (n === 1 ? "" : "s"); };
+
+  async function callApi(path, body) {
+    var resp = await fetch(path, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(body),
+    });
+    var data = await resp.json().catch(function () { return { error: "Unexpected server response." }; });
+    if (!resp.ok || data.error) throw new Error(data.error || "Request failed.");
+    return data;
+  }
+
+  function showPost(info) {
+    $("post-link").textContent = info.type + " by @" + info.owner;
+    $("post-link").href = info.url;
+    $("post-meta").textContent = info.date + " · " + plural(info.likes, "like") + " · " +
+      plural(info.declared_comments, "comment") + " declared";
+    var caption = info.caption.trim();
+    $("post-caption").textContent = caption || "(no caption)";
+    $("post-caption").classList.toggle("empty", !caption);
+    $("post-section").hidden = false;
+  }
+
+  function showResult(result) {
+    var n = result.matches.length;
+    var status = $("result-status");
+    status.className = "status " + (n ? "ok" : "no");
+    status.textContent = n ? "Found " + plural(n, "comment") + " by @" + result.target
+                           : "No comments by @" + result.target;
+    $("result-meta").textContent = plural(result.scanned, "comment") + " scanned out of " +
+      result.declared_comments + " declared";
+
+    var list = $("matches");
+    list.replaceChildren();
+    result.matches.forEach(function (m) {
+      var card = document.createElement("div");
+      card.className = "card comment";
+
+      var meta = document.createElement("div");
+      meta.className = "meta";
+      meta.textContent = (m.reply_to ? "Reply to @" + m.reply_to : "Comment") + " · " + m.date +
+        " · " + plural(m.likes, "like");
+      if (m.hidden) {
+        var badge = document.createElement("span");
+        badge.className = "hidden-badge";
+        badge.textContent = "hidden by Instagram";
+        meta.append(" · ", badge);
+      }
+
+      var text = document.createElement("p");
+      text.textContent = m.text;
+
+      var link = document.createElement("a");
+      link.href = m.url;
+      link.target = "_blank";
+      link.rel = "noopener";
+      link.textContent = "Open on Instagram";
+
+      card.append(meta, text, link);
+      list.append(card);
+    });
+    $("result-section").hidden = false;
+  }
+
+  $("search-form").addEventListener("submit", async function (event) {
+    event.preventDefault();
+    var body = {
+      post: $("post").value.trim(),
+      target: $("target").value.trim(),
+      replies: $("replies").checked,
+      all: $("all").checked,
+    };
+    var button = $("submit");
+    button.disabled = true;
+    ["error", "post-section", "waiting", "result-section"].forEach(function (id) { $(id).hidden = true; });
+
+    try {
+      button.textContent = "Loading post…";
+      showPost(await callApi("/api/post", { post: body.post }));
+
+      button.textContent = "Searching…";
+      $("waiting").hidden = false;
+      showResult(await callApi("/api/search", body));
+    } catch (err) {
+      $("error").textContent = err.message;
+      $("error").hidden = false;
+    } finally {
+      $("waiting").hidden = true;
+      button.disabled = false;
+      button.textContent = "Search";
+    }
   });
 </script>
 </body>

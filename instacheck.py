@@ -1,7 +1,7 @@
-"""Logica condivisa: configurazione, login e ricerca del commento di un account.
+"""Shared logic: configuration, login and searching for an account's comment.
 
-I commenti vengono letti in streaming (pagina per pagina) e la ricerca si ferma
-al primo commento trovato: nulla viene salvato su disco.
+Comments are streamed (one page at a time) and the search stops at the first
+match: nothing is saved to disk.
 """
 
 import configparser
@@ -11,7 +11,7 @@ import sys
 import time
 import warnings
 
-# Avviso innocuo di urllib3 con il Python di sistema del Mac (LibreSSL): lo nascondiamo.
+# Harmless urllib3 warning with macOS's system Python (LibreSSL): silence it.
 warnings.filterwarnings("ignore", message="urllib3 v2 only supports OpenSSL")
 
 import instaloader  # noqa: E402
@@ -23,28 +23,28 @@ SHORTCODE_RE = re.compile(r"instagram\.com/(?:[^/]+/)?(?:p|reel|reels|tv)/([A-Za
 
 
 def load_config(path=CONFIG_PATH):
-    """Legge la sezione [instagram] di config.ini."""
+    """Reads the [instagram] section of config.ini."""
     if not os.path.exists(path):
-        sys.exit(f"File di configurazione mancante: {path}\n"
-                 f"Copia config.example.ini in config.ini e inserisci le tue credenziali.")
+        sys.exit(f"Missing configuration file: {path}\n"
+                 f"Copy config.example.ini to config.ini and fill in your credentials.")
     parser = configparser.ConfigParser(interpolation=None)
     parser.read(path, encoding="utf-8")
     section = parser["instagram"] if parser.has_section("instagram") else {}
     config = {key: section.get(key, "").strip() for key in ("username", "password", "sessionid", "csrftoken")}
     config["username"] = config["username"].lstrip("@")
     if not config["username"]:
-        sys.exit(f"Manca 'username' nella sezione [instagram] di {path}")
+        sys.exit(f"'username' is missing from the [instagram] section of {path}")
     return config
 
 
 def login_with_browser_cookies(loader, config):
-    """Usa i cookie copiati dal browser: evita i blocchi "checkpoint" del login da script."""
+    """Uses cookies copied from the browser: avoids "checkpoint" blocks on scripted logins."""
     if not config["csrftoken"]:
-        sys.exit("In config.ini c'è 'sessionid' ma manca 'csrftoken': copia anche quel cookie dal browser.")
+        sys.exit("config.ini has 'sessionid' but no 'csrftoken': copy that cookie from the browser too.")
     loader.load_session(config["username"], {"sessionid": config["sessionid"], "csrftoken": config["csrftoken"]})
     logged_as = loader.test_login()
     if not logged_as:
-        sys.exit("I cookie in config.ini non sono validi o sono scaduti: ricopiali dal browser.")
+        sys.exit("The cookies in config.ini are invalid or expired: copy them from the browser again.")
     loader.context.username = logged_as
 
 
@@ -54,30 +54,30 @@ def login_with_password(loader, config):
             try:
                 loader.login(config["username"], config["password"])
             except instaloader.TwoFactorAuthRequiredException:
-                loader.two_factor_login(input("Codice 2FA: ").strip())
+                loader.two_factor_login(input("2FA code: ").strip())
         else:
             loader.interactive_login(config["username"])
     except instaloader.exceptions.BadCredentialsException:
-        sys.exit("Password errata: controlla config.ini.")
+        sys.exit("Wrong password: check config.ini.")
     except instaloader.exceptions.LoginException as exc:
         if "checkpoint" in str(exc).lower():
-            sys.exit("Instagram ha bloccato il login da script (verifica di sicurezza \"checkpoint\").\n"
-                     "Soluzione: accedi a instagram.com dal browser e copia i cookie 'sessionid' e\n"
-                     "'csrftoken' in config.ini (istruzioni in config.example.ini), poi riavvia.")
-        sys.exit(f"Login non riuscito: {exc}")
+            sys.exit("Instagram blocked the scripted login (\"checkpoint\" security check).\n"
+                     "Fix: log in to instagram.com in your browser and copy the 'sessionid' and\n"
+                     "'csrftoken' cookies into config.ini (see config.example.ini), then restart.")
+        sys.exit(f"Login failed: {exc}")
 
 
 def create_logged_loader(config_path=CONFIG_PATH):
-    """Crea un Instaloader autenticato usando config.ini.
+    """Creates an authenticated Instaloader using config.ini.
 
-    Ordine: sessione già salvata, cookie del browser (sessionid), password.
-    Dopo un nuovo login la sessione viene salvata per le volte successive.
+    Order: previously saved session, browser cookies (sessionid), password.
+    After a new login the session is saved for next time.
     """
     config = load_config(config_path)
     loader = instaloader.Instaloader(quiet=True)
     try:
         loader.load_session_from_file(config["username"])
-        print(f"Sessione caricata per @{config['username']}", file=sys.stderr)
+        print(f"Session loaded for @{config['username']}", file=sys.stderr)
         return loader
     except FileNotFoundError:
         pass
@@ -87,7 +87,7 @@ def create_logged_loader(config_path=CONFIG_PATH):
     else:
         login_with_password(loader, config)
     loader.save_session_to_file(get_default_session_filename(config["username"]))
-    print(f"Login effettuato come @{loader.context.username}, sessione salvata", file=sys.stderr)
+    print(f"Logged in as @{loader.context.username}, session saved", file=sys.stderr)
     return loader
 
 
@@ -101,21 +101,21 @@ WEB_HEADERS = {
     "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 "
                   "(KHTML, like Gecko) Chrome/140.0.0.0 Safari/537.36",
     "Accept": "*/*",
-    "X-IG-App-ID": "936619743392459",  # ID pubblico della web app di Instagram
+    "X-IG-App-ID": "936619743392459",  # public ID of Instagram's web app
     "X-Requested-With": "XMLHttpRequest",
     "Referer": "https://www.instagram.com/",
     "Sec-Fetch-Mode": "cors",
     "Sec-Fetch-Site": "same-origin",
     "Sec-Fetch-Dest": "empty",
 }
-PAGE_DELAY = 1.0  # secondi di pausa tra una pagina e l'altra, per non farsi limitare
+PAGE_DELAY = 1.0  # seconds to wait between pages, to avoid rate limiting
 
 
 class WebComments:
-    """Legge i commenti con la stessa API usata dal sito instagram.com.
+    """Reads comments through the same API used by the instagram.com website.
 
-    L'endpoint "iPad" usato da instaloader per i post con molti commenti oggi
-    risponde "something went wrong"; quello web invece funziona con gli stessi cookie.
+    The "iPad" endpoint instaloader uses for posts with many comments currently
+    answers "something went wrong"; the web one works with the same cookies.
     """
 
     def __init__(self, loader):
@@ -131,20 +131,20 @@ class WebComments:
         if resp.status_code == 429:
             raise instaloader.exceptions.TooManyRequestsException("429 Too Many Requests")
         if resp.status_code in (401, 403):
-            raise instaloader.exceptions.LoginRequiredException(f"{resp.status_code} su {path}")
+            raise instaloader.exceptions.LoginRequiredException(f"{resp.status_code} on {path}")
         if resp.status_code == 404:
             raise instaloader.exceptions.QueryReturnedNotFoundException(path)
         try:
             data = resp.json()
         except ValueError:
             raise instaloader.exceptions.LoginRequiredException(
-                f"risposta non valida da {path} (sessione scaduta?)") from None
+                f"invalid response from {path} (expired session?)") from None
         if data.get("status") != "ok":
-            raise instaloader.exceptions.ConnectionException(data.get("message") or f"errore su {path}")
+            raise instaloader.exceptions.ConnectionException(data.get("message") or f"error on {path}")
         return data
 
     def _replies(self, media_id, comment):
-        """Tutte le risposte a un commento (usa l'anteprima se è già completa)."""
+        """All replies to a comment (uses the preview when it is already complete)."""
         preview = comment.get("preview_child_comments") or []
         if comment.get("child_comment_count", 0) <= len(preview):
             yield from preview
@@ -159,7 +159,7 @@ class WebComments:
             time.sleep(PAGE_DELAY)
 
     def iter_comments(self, media_id, include_replies=True):
-        """Genera (commento, commento_padre) pagina per pagina, senza salvare nulla."""
+        """Yields (comment, parent_comment) page by page, without saving anything."""
         params = {"can_support_threading": "true", "permalink_enabled": "false"}
         seen_cursors = set()
         while True:
@@ -191,22 +191,42 @@ def format_comment(node, parent, shortcode):
     }
 
 
-def find_comments(loader, post_ref, target, include_replies=True, find_all=False):
-    """Cerca i commenti di `target` sotto il post indicato da URL o shortcode.
+def get_post(loader, post_ref):
+    """Fetches the post given by URL or shortcode."""
+    return instaloader.Post.from_shortcode(loader.context, parse_shortcode(post_ref))
 
-    Restituisce un dizionario con i dati del post, i commenti trovati e il
-    numero di commenti analizzati.
+
+def post_info(post):
+    """Details that help confirm it is the right post."""
+    return {
+        "shortcode": post.shortcode,
+        "url": f"https://www.instagram.com/p/{post.shortcode}/",
+        "owner": post.owner_username,
+        "caption": post.caption or "",
+        "date": f"{post.date_utc:%Y-%m-%d %H:%M} UTC",
+        "type": {"GraphImage": "Photo", "GraphVideo": "Video", "GraphSidecar": "Carousel"}.get(post.typename, "Post"),
+        "likes": post.likes,
+        "declared_comments": post.comments,
+    }
+
+
+def find_comments(loader, post_ref, target, include_replies=True, find_all=False, post=None):
+    """Searches for comments by `target` under the post given by URL or shortcode.
+
+    Pass `post` if it has already been fetched, to avoid a second request.
+    Returns a dict with the post details, the matching comments and the
+    number of comments scanned.
     """
     target = target.strip().lstrip("@").lower()
-    shortcode = parse_shortcode(post_ref)
-    post = instaloader.Post.from_shortcode(loader.context, shortcode)
+    post = post or get_post(loader, post_ref)
+    shortcode = post.shortcode
 
     matches = []
     scanned = 0
     for node, parent in WebComments(loader).iter_comments(post.mediaid, include_replies):
         scanned += 1
         if scanned % 100 == 0:
-            print(f"  ...{scanned} commenti analizzati", file=sys.stderr)
+            print(f"  ...{scanned} comments scanned", file=sys.stderr)
         if node["user"]["username"].lower() == target:
             matches.append(format_comment(node, parent, shortcode))
             if not find_all:

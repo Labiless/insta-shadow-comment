@@ -6,9 +6,6 @@ nothing is saved to disk.
 
 It can be used from a local web page or from the terminal.
 
-> The tool's interface and messages are in Italian. Below, Italian labels are quoted as they
-> appear, followed by their English meaning.
-
 ## Requirements
 
 - macOS or Linux with **Python 3.9+** (already installed on macOS: check with `python3 --version`)
@@ -82,12 +79,13 @@ source .venv/bin/activate
 python app.py
 ```
 
-Open **http://127.0.0.1:8000** in your browser, paste the post link ("Link del post"), type the
-account to look for ("Account da cercare") and press **Cerca** (Search). The result appears below
-the form. Available options:
+Open **http://127.0.0.1:8000** in your browser, paste the **Post link**, type the
+**Account to look for** and press **Search**. The post's author, date and caption are shown
+first, so you can check it is the right post while the comments are being searched; the result
+appears below. Available options:
 
-- **Includi le risposte** (include replies): also search among replies to comments
-- **Trova tutti i commenti dell'account** (find all of the account's comments): do not stop at the first match
+- **Include replies**: also search among replies to comments
+- **Find all of the account's comments**: do not stop at the first match
 
 To stop the server press **Ctrl+C** in the terminal. The page is reachable only from your own computer.
 
@@ -104,7 +102,7 @@ python check_comment.py XXXXXXX account_to_find --no-replies   # skip replies (f
 | Result | Meaning |
 |---|---|
 | Found | the comment is visible to other users |
-| Found, marked **"nascosto da Instagram"** (hidden by Instagram) | it is among the "hidden comments" (usually the offensive/spam filter) |
+| Found, marked **"hidden by Instagram"** | it is among the "hidden comments" (usually the offensive/spam filter) |
 | Not found | it is not visible to others: deleted, hidden by the post's author (restricted account, hidden words, ...) or filtered by Instagram |
 
 The comment count declared by the post is often higher than the number of comments scanned:
@@ -117,11 +115,11 @@ post by a different profile and check it with the tool.
 
 | Message | What to do |
 |---|---|
-| `File di configurazione mancante` (missing configuration file) | create `config.ini` from `config.example.ini` |
-| `Checkpoint required` / login blocked | use the browser cookie method |
-| `I cookie ... non sono validi o sono scaduti` (cookies invalid or expired) | copy `sessionid` and `csrftoken` from the browser again |
-| `La sessione non è più valida` (session no longer valid) | delete `~/.config/instaloader/session-<username>` and restart |
-| `Instagram ha limitato le richieste` (Instagram rate-limited the requests) | wait a few minutes before trying again |
+| `Missing configuration file` | create `config.ini` from `config.example.ini` |
+| `Instagram blocked the scripted login` / `Checkpoint required` | use the browser cookie method |
+| `The cookies in config.ini are invalid or expired` | copy `sessionid` and `csrftoken` from the browser again |
+| `The session is no longer valid` | delete `~/.config/instaloader/session-<username>` and restart |
+| `Instagram is rate-limiting requests` | wait a few minutes before trying again |
 | `Address already in use` when starting `app.py` | another instance is already running: close it or change `PORT` in `app.py` |
 
 ## Project structure

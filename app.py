@@ -1,69 +1,90 @@
 #!/usr/bin/env python3
-"""Pagina web locale per cercare il commento di un account sotto un post.
+"""Local web page to search for an account's comment under a post.
 
-Avvio:
+Start:
     python app.py
-poi apri http://127.0.0.1:8000 nel browser.
+then open http://127.0.0.1:8000 in your browser.
 """
 
 import threading
 
 import instaloader
-from flask import Flask, render_template, request
+from flask import Flask, jsonify, render_template, request
 
-from instacheck import create_logged_loader, find_comments
+from instacheck import create_logged_loader, find_comments, get_post, parse_shortcode, post_info
 
-HOST = "127.0.0.1"  # solo questo computer: la pagina non è raggiungibile da altri
+HOST = "127.0.0.1"  # this computer only: the page is not reachable from other devices
 PORT = 8000
 
 app = Flask(__name__)
 
-# Login una sola volta all'avvio (qui, nel terminale, si può inserire l'eventuale codice 2FA).
+# Log in once at startup (here, in the terminal, you can enter a 2FA code if needed).
 loader = create_logged_loader()
-# Instaloader non è pensato per richieste in parallelo: una ricerca alla volta.
-search_lock = threading.Lock()
+# Instaloader is not designed for parallel requests: one request to Instagram at a time.
+instagram_lock = threading.Lock()
+# Posts already fetched for the preview, reused by the search to avoid a second request.
+post_cache = {}
 
 
 def error_message(exc):
     if isinstance(exc, instaloader.exceptions.TooManyRequestsException):
-        return "Instagram ha limitato le richieste (troppe in poco tempo). Riprova tra qualche minuto."
+        return "Instagram is rate-limiting requests (too many in a short time). Try again in a few minutes."
     if isinstance(exc, instaloader.exceptions.LoginRequiredException):
-        return "La sessione non è più valida: cancella il file di sessione e riavvia l'app."
+        return "The session is no longer valid: delete the session file and restart the app."
     if isinstance(exc, (instaloader.exceptions.BadResponseException,
                         instaloader.exceptions.QueryReturnedNotFoundException)):
-        return "Post non trovato: controlla il link (o il post è privato/eliminato)."
-    return f"Errore da Instagram: {exc}"
+        return "Post not found: check the link (or the post is private/deleted)."
+    return f"Error from Instagram: {exc}"
 
 
-@app.route("/", methods=["GET", "POST"])
+def with_instagram(action):
+    """Runs `action` holding the lock and turns errors into a JSON response."""
+    if not instagram_lock.acquire(blocking=False):
+        return jsonify(error="A search is already running: wait for it to finish."), 409
+    try:
+        return jsonify(action())
+    except instaloader.exceptions.InstaloaderException as exc:
+        return jsonify(error=error_message(exc)), 502
+    finally:
+        instagram_lock.release()
+
+
+def cached_post(post_ref):
+    shortcode = parse_shortcode(post_ref)
+    if shortcode not in post_cache:
+        if len(post_cache) > 50:
+            post_cache.clear()
+        post_cache[shortcode] = get_post(loader, post_ref)
+    return post_cache[shortcode]
+
+
+@app.route("/")
 def index():
-    form = {"post": "", "target": "", "replies": True, "all": False}
-    result = None
-    error = None
+    return render_template("index.html")
 
-    if request.method == "POST":
-        form = {
-            "post": request.form.get("post", "").strip(),
-            "target": request.form.get("target", "").strip(),
-            "replies": "replies" in request.form,
-            "all": "all" in request.form,
-        }
-        if not form["post"] or not form["target"]:
-            error = "Inserisci sia il link del post sia l'account da cercare."
-        elif not search_lock.acquire(blocking=False):
-            error = "C'è già una ricerca in corso: attendi che finisca."
-        else:
-            try:
-                result = find_comments(loader, form["post"], form["target"],
-                                       include_replies=form["replies"], find_all=form["all"])
-            except instaloader.exceptions.InstaloaderException as exc:
-                error = error_message(exc)
-            finally:
-                search_lock.release()
 
-    return render_template("index.html", form=form, result=result, error=error)
+@app.post("/api/post")
+def api_post():
+    post_ref = (request.get_json(silent=True) or {}).get("post", "").strip()
+    if not post_ref:
+        return jsonify(error="Enter the post link."), 400
+    return with_instagram(lambda: post_info(cached_post(post_ref)))
+
+
+@app.post("/api/search")
+def api_search():
+    data = request.get_json(silent=True) or {}
+    post_ref = data.get("post", "").strip()
+    target = data.get("target", "").strip()
+    if not post_ref or not target:
+        return jsonify(error="Enter both the post link and the account to look for."), 400
+    return with_instagram(lambda: find_comments(
+        loader, post_ref, target,
+        include_replies=bool(data.get("replies")), find_all=bool(data.get("all")),
+        post=cached_post(post_ref),
+    ))
 
 
 if __name__ == "__main__":
-    print(f"Apri http://{HOST}:{PORT} nel browser (Ctrl+C per fermare)")
+    print(f"Open http://{HOST}:{PORT} in your browser (Ctrl+C to stop)")
     app.run(host=HOST, port=PORT, threaded=True)
