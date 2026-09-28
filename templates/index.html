@@ -1,0 +1,115 @@
+<!doctype html>
+<html lang="it">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Cerca commento</title>
+  <style>
+    :root {
+      --bg: #f6f6f4; --card: #ffffff; --text: #1d1d1b; --muted: #6b6b66;
+      --border: #deded8; --accent: #3b5bdb; --ok: #1f7a4d; --ok-bg: #e7f5ec;
+      --no: #9a3412; --no-bg: #fdeee6; --err: #b42318; --err-bg: #fdecea;
+    }
+    @media (prefers-color-scheme: dark) {
+      :root {
+        --bg: #161615; --card: #1f1f1d; --text: #ececea; --muted: #a0a09a;
+        --border: #34342f; --accent: #7d96ff; --ok: #6fd6a0; --ok-bg: #16301f;
+        --no: #f4a77a; --no-bg: #35200f; --err: #ff8a80; --err-bg: #3a1614;
+      }
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0; background: var(--bg); color: var(--text);
+      font: 16px/1.5 -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+    }
+    main { max-width: 640px; margin: 48px auto; padding: 0 16px; }
+    h1 { font-size: 1.5rem; margin: 0 0 4px; }
+    .sub { color: var(--muted); margin: 0 0 24px; }
+    .card {
+      background: var(--card); border: 1px solid var(--border);
+      border-radius: 12px; padding: 20px; margin-bottom: 16px;
+    }
+    label { display: block; font-weight: 600; margin-bottom: 6px; }
+    input[type=text] {
+      width: 100%; padding: 10px 12px; font: inherit; color: var(--text);
+      background: var(--bg); border: 1px solid var(--border); border-radius: 8px;
+      margin-bottom: 16px;
+    }
+    input[type=text]:focus { outline: 2px solid var(--accent); border-color: transparent; }
+    .checks { display: flex; gap: 20px; flex-wrap: wrap; margin-bottom: 20px; }
+    .checks label { font-weight: 400; display: flex; gap: 8px; align-items: center; margin: 0; }
+    button {
+      font: inherit; font-weight: 600; color: #fff; background: var(--accent);
+      border: 0; border-radius: 8px; padding: 10px 20px; cursor: pointer;
+    }
+    button:disabled { opacity: .6; cursor: wait; }
+    .status { border-radius: 12px; padding: 14px 18px; margin-bottom: 16px; font-weight: 600; }
+    .status.ok { background: var(--ok-bg); color: var(--ok); }
+    .status.no { background: var(--no-bg); color: var(--no); }
+    .status.err { background: var(--err-bg); color: var(--err); }
+    .meta { color: var(--muted); font-size: .9rem; }
+    .comment p { margin: 8px 0; white-space: pre-wrap; word-wrap: break-word; }
+    .comment a { color: var(--accent); }
+    .hidden-badge { color: var(--no); font-weight: 600; }
+  </style>
+</head>
+<body>
+<main>
+  <h1>Cerca commento</h1>
+  <p class="sub">Verifica se un account ha commentato un post Instagram.</p>
+
+  <form class="card" method="post" id="search-form">
+    <label for="post">Link del post</label>
+    <input type="text" id="post" name="post" placeholder="https://www.instagram.com/p/..." value="{{ form.post }}" required>
+
+    <label for="target">Account da cercare</label>
+    <input type="text" id="target" name="target" placeholder="nome_utente" value="{{ form.target }}" required>
+
+    <div class="checks">
+      <label><input type="checkbox" name="replies" {% if form.replies %}checked{% endif %}> Includi le risposte</label>
+      <label><input type="checkbox" name="all" {% if form.all %}checked{% endif %}> Trova tutti i commenti dell'account</label>
+    </div>
+
+    <button type="submit" id="submit">Cerca</button>
+  </form>
+
+  {% if error %}
+    <div class="status err">{{ error }}</div>
+  {% endif %}
+
+  {% if result %}
+    {% if result.matches %}
+      <div class="status ok">
+        Trovat{{ 'o' if result.matches|length == 1 else 'i' }} {{ result.matches|length }}
+        comment{{ 'o' if result.matches|length == 1 else 'i' }} di @{{ result.target }}
+      </div>
+    {% else %}
+      <div class="status no">Nessun commento di @{{ result.target }}</div>
+    {% endif %}
+    <p class="meta">
+      Post di @{{ result.post_owner }} · {{ result.declared_comments }} commenti dichiarati ·
+      {{ result.scanned }} analizzati
+    </p>
+
+    {% for m in result.matches %}
+      <div class="card comment">
+        <div class="meta">
+          {% if m.reply_to %}Risposta a @{{ m.reply_to }}{% else %}Commento{% endif %}
+          · {{ m.date }} · {{ m.likes }} like
+          {% if m.hidden %}· <span class="hidden-badge">nascosto da Instagram</span>{% endif %}
+        </div>
+        <p>{{ m.text }}</p>
+        <a href="{{ m.url }}" target="_blank" rel="noopener">Apri su Instagram</a>
+      </div>
+    {% endfor %}
+  {% endif %}
+</main>
+<script>
+  document.getElementById("search-form").addEventListener("submit", function () {
+    var btn = document.getElementById("submit");
+    btn.disabled = true;
+    btn.textContent = "Ricerca in corso… (può richiedere qualche minuto)";
+  });
+</script>
+</body>
+</html>
